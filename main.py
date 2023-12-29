@@ -144,7 +144,7 @@ with app.app_context():
         id = request.args.get('id')
         response = requests.get(f"https://api.themoviedb.org/3/movie/{id}?api_key=<YOUR API KEY>")
         movie_details = response.json()
-        #test
+
         new_movie = Movie(
             title=movie_details['title'],
             year=movie_details['release_date'].split('-')[0],

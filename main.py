@@ -9,26 +9,29 @@ from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
 import requests
 import os
-from datetime import datetime
 
 TMDB_KEY = os.environ['TMDB_KEY']
+SECRET_KEY = os.environ['SECRET_KEY']
 
 db = SQLAlchemy()
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'YOUR SECRET KEY'
+app.config['SECRET_KEY'] = SECRET_KEY
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///movie-collections.db'
 db.init_app(app)
 Bootstrap5(app)
 
+headers = {
+    "accept": "application/json",
+}
 
 class Movie(db.Model):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     desc: Mapped[str] = mapped_column(String, nullable=False)
-    rating: Mapped[float] = mapped_column(FLOAT, nullable=False)
-    ranking: Mapped[int] = mapped_column(Integer, nullable=False)
-    review: Mapped[str] = mapped_column(String, nullable=False)
+    rating: Mapped[float] = mapped_column(FLOAT, nullable=True)
+    ranking: Mapped[int] = mapped_column(Integer, nullable=True)
+    review: Mapped[str] = mapped_column(String, nullable=True)
     img_url: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -43,10 +46,10 @@ class AddForm(FlaskForm):
     submit = SubmitField("Add Movie")
 
 with app.app_context():
-    # ---- CREATE NEW DB ---- #
+    # ---- TO CREATE NEW DB, UNCOMMENT BELOW LINE ---- #
     # db.create_all()
 
-    # ---- ADD FIRST RECORD ---- #
+    # ---- TO ADD FIRST SAMPLE RECORD, UNCOMMENT BELOW LINES ---- #
     # db.session.add(Movie(
     #     title="Phone Booth",
     #     year=2002,
@@ -58,7 +61,7 @@ with app.app_context():
     # ))
     # db.session.commit()
 
-    # ---- ADD SECOND RECORD ---- #
+    # ---- TO ADD SECOND SAMPLE RECORD, UNCOMMENT THIS LINE ---- #
     # db.session.add(Movie(
     #     title="Avatar The Way of Water",
     #     year=2022,
@@ -70,64 +73,89 @@ with app.app_context():
     # ))
     # db.session.commit()
 
-    def search_movie(title):
-        search_url = f"https://api.themoviedb.org/3/search/movie?api_key=<YOUR API KEY>={title}"
 
-        response = requests.get(search_url)
-        # id = result['id']
-        # desc = result['overview']
-        # year = result['release_date'].split('-')[0]
-        # img_url = f"http://image.tmdb.org/t/p/original/{result['poster_path']}"
+    # def new_movie(title, year, desc, img_url, rating=0, ranking=0, review="None"):
+    #     db.session.add(Movie(
+    #         title=title,
+    #         year=year,
+    #         desc=desc,
+    #         rating=rating,
+    #         ranking=ranking,
+    #         review=review,
+    #         img_url=img_url
+    #     ))
+    #     db.session.commit()
+
+
+    def search_movie_id(title):
+        params = {
+            'query': title
+        }
+        search_url = f"https://api.themoviedb.org/3/search/movie?api_key=<YOUR API KEY>"
+        response = requests.get(search_url, headers=headers, params=params)
         return response.json()['results']
-
-    def get_review(id):
-        review_url = f"https://api.themoviedb.org/3/movie/{id}/reviews?language=en-US&page=1&accept=application/json&api_key=<YOUR API KEY>"
-        response = requests.get(review_url)
-        result = response.json()['results']
-        review = result['content']
-        rating = result['author_details']['rating']
-        return (review, rating)
 
 
     @app.route("/")
     def home():
+        movies = db.session.execute(sa.select(Movie).order_by(Movie.rating.desc())).scalars()
+        rating_list = [movie.rating for movie in movies]
+
+        for num in range(len(rating_list), 0, -1):
+            movie = db.session.execute(sa.select(Movie).where(Movie.rating == rating_list[num-1])).scalar()
+            movie.ranking = num
+            db.session.commit()
+
         movies = db.session.execute(sa.select(Movie).order_by(Movie.ranking.desc())).scalars()
         return render_template("index.html", movies=movies)
 
 
-    @app.route("/<int:rank>")
-    def delete_movie(rank):
-        movie_to_delete = db.session.execute(sa.select(Movie).where(Movie.ranking == rank)).scalar()
+    @app.route("/<int:id>")
+    def delete_movie(id):
+        movie_to_delete = db.session.execute(sa.select(Movie).where(Movie.id == id)).scalar()
         db.session.delete(movie_to_delete)
         db.session.commit()
         return redirect("/")
 
 
-    @app.route("/edit/<int:rank>", methods=['GET', 'POST'])
-    def edit(rank):
+    @app.route("/edit/<int:id>", methods=['GET', 'POST'])
+    def edit(id):
         form = EditForm()
-        movie = db.session.execute(sa.select(Movie).where(Movie.ranking == rank)).scalar()
-
+        movie = db.session.execute(sa.select(Movie).where(Movie.id == id)).scalar()
         if form.validate_on_submit():
             movie.rating = form.rating.data
             movie.review = form.review.data
             db.session.commit()
-
             return redirect('/')
-
         return render_template("edit.html", title=movie.title, form=form)
 
 
     @app.route("/add", methods=['GET', 'POST'])
     def add_movie():
         form = AddForm()
-
         if form.validate_on_submit():
-            movies = search_movie(form.title.data)
-
+            movies = search_movie_id(form.title.data)
             return render_template('select.html', movies=movies)
-
         return render_template("add.html", form=form)
+
+
+    @app.route("/find")
+    def get_movie_details():
+        id = request.args.get('id')
+        response = requests.get(f"https://api.themoviedb.org/3/movie/{id}?api_key=<YOUR API KEY>")
+        movie_details = response.json()
+
+        new_movie = Movie(
+            title=movie_details['title'],
+            year=movie_details['release_date'].split('-')[0],
+            desc=movie_details['overview'],
+            img_url=f"https://image.tmdb.org/t/p/w500{movie_details['poster_path']}"
+        )
+        db.session.add(new_movie)
+        db.session.commit()
+
+        print(new_movie.id)
+        return redirect(url_for('edit', id=new_movie.id))
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -8,7 +8,7 @@
 
   {% for movie in movies %}
   <p>
-    <a href="#"> {{ movie['original_title'] }} - {{ movie['release_date'] }}</a>
+    <a href="{{url_for('get_movie_details', id=movie['id'])}}"> {{ movie['original_title'] }} - {{ movie['release_date'] }}</a>
   </p>
   {% endfor %}
 
